@@ -15,11 +15,7 @@ Every 60 s, _recalculate():
   2. Computes mean and stddev from REAL counts — NO floor on mean
   3. Applies FIX 1: proportional stddev floor (min_stddev_ratio × mean)
      to prevent near-zero variance causing absurd z-scores on uniform traffic
-  4. Does NOT ban anyone until sample_count >= min_baseline_samples (FIX 3)
-
-Bug fixes from uploaded version (already present):
-  - Double-count fix: reset accumulators after flush in _recalculate()
-  - Deprecated datetime fix: utcnow/utcfromtimestamp → timezone-aware
+  4. Does NOT ban anyone until sample_count >= min_baseline_sample 
 """
 
 import logging
@@ -160,31 +156,23 @@ class BaselineTracker:
         """
         Recompute effective_mean and effective_stddev from real traffic.
 
-        FIX 1 — Proportional stddev floor:
+       Proportional stddev floor:
           When traffic is perfectly uniform (e.g. exactly 1 scanner req/s
           every second), stddev collapses to ~0. Any tiny fluctuation then
           produces a z-score in the thousands, banning innocent IPs.
-          We enforce: stddev >= mean * min_stddev_ratio (default 0.3).
-          This scales with traffic — NOT a hardcoded constant.
-          Crucially, effective_mean is NEVER modified.
-
-        FIX 3 (via sample_count property + detector.py guard):
+          
           _recalculate does not itself block detection — the detector reads
           sample_count and refuses to fire until min_baseline_samples is met.
-
-        Double-count fix:
-          After flushing the in-progress second, reset accumulators to 0 so
-          record_request() does not flush the same bucket a second time.
         """
         min_samp       = self._cfg.baseline.min_samples_for_hourly
         min_stddev_ratio = getattr(self._cfg.baseline, "min_stddev_ratio", 0.3)
 
         with self._lock:
-            # Flush in-progress second (double-count fix)
+            # Flush in-progress second
             if self._current_second != 0 and self._count_this_second > 0:
                 self._window.append((self._current_second, self._count_this_second))
                 self._add_to_hourly(self._current_second, self._count_this_second)
-                self._current_second    = 0   # RESET — prevents double-flush
+                self._current_second    = 0 
                 self._count_this_second = 0
 
             # Source selection
@@ -209,11 +197,9 @@ class BaselineTracker:
             var  = sum((x - mean) ** 2 for x in counts) / n
             stddev = math.sqrt(var)
 
-            # ── FIX 1: proportional stddev floor ─────────────────────────
+            # proportional stddev floor ─────────────────────────
             # Prevents near-zero variance from producing absurd z-scores on
             # perfectly uniform traffic (e.g. exactly 1 req/s always).
-            # We scale with mean so this is never a hardcoded constant.
-            # effective_mean is NOT touched — only stddev gets a floor.
             if mean > 0:
                 min_stddev = mean * min_stddev_ratio
                 effective_stddev = max(stddev, min_stddev)
@@ -234,7 +220,7 @@ class BaselineTracker:
                 self._baseline_error_rate = total_errs / total_reqs
 
             old_mean     = self._mean
-            self._mean   = mean               # REAL computed mean — never faked
+            self._mean   = mean               
             self._stddev = effective_stddev   # proportional floor applied
             self._source = source
 
