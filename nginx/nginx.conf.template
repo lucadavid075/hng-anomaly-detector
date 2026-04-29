@@ -1,0 +1,133 @@
+user  nginx;
+worker_processes  auto;
+error_log  /var/log/nginx/error.log warn;
+pid        /var/run/nginx.pid;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include       /etc/nginx/mime.types;
+    default_type  application/octet-stream;
+    sendfile      on;
+    keepalive_timeout 65;
+
+    # ── Trust real client IP from X-Forwarded-For ────────────────────────
+    # Nextcloud sits behind this Nginx. Forward the original client IP so
+    # the anomaly detector sees real IPs (not 172.x Docker bridge addresses).
+    real_ip_header    X-Forwarded-For;
+    real_ip_recursive on;
+    set_real_ip_from  10.0.0.0/8;
+    set_real_ip_from  172.16.0.0/12;
+    set_real_ip_from  192.168.0.0/16;
+
+    # ── JSON access log format ───────────────────────────────────────────
+    # Every field the detector needs is present. Nginx writes this to the
+    # HNG-nginx-logs Docker volume; the detector mounts it read-only.
+    log_format json_access escape=json
+        '{'
+            '"source_ip":"$remote_addr",'
+            '"timestamp":"$time_iso8601",'
+            '"method":"$request_method",'
+            '"path":"$request_uri",'
+            '"status":$status,'
+            '"response_size":$body_bytes_sent,'
+            '"http_referer":"$http_referer",'
+            '"http_user_agent":"$http_user_agent",'
+            '"request_time":$request_time,'
+            '"upstream_response_time":"$upstream_response_time",'
+            '"x_forwarded_for":"$http_x_forwarded_for"'
+        '}';
+
+    access_log /var/log/nginx/hng-access.log json_access;
+
+    # ── Upstreams ────────────────────────────────────────────────────────
+    upstream nextcloud_backend {
+        server nextcloud:80;
+    }
+
+    # Detector dashboard runs on host network at port 8080.
+    # host.docker.internal resolves to the host gateway from inside Docker.
+    upstream detector_dashboard {
+        server host.docker.internal:8080;
+    }
+
+    # ── Server 1: HTTP — ACME challenge + redirect to HTTPS ─────────────
+    server {
+        listen 80;
+        server_name ddos-detector.duckdns.org;
+
+        # Certbot places the ACME challenge token here so Let's Encrypt
+        # can verify we own the domain before issuing/renewing the cert.
+        location /.well-known/acme-challenge/ {
+            root /var/www/certbot;
+        }
+
+        # Everything else gets an HTTP → HTTPS permanent redirect.
+        location / {
+            return 301 https://$host$request_uri;
+        }
+    }
+
+    # ── Server 2: HTTPS — main traffic ──────────────────────────────────
+    server {
+        listen 443 ssl;
+        http2  on;
+        server_name ddos-detector.duckdns.org;
+
+        # TLS certificate issued by Let's Encrypt via Certbot.
+        ssl_certificate     /etc/letsencrypt/live/ddos-detector.duckdns.org/fullchain.pem;
+        ssl_certificate_key /etc/letsencrypt/live/ddos-detector.duckdns.org/privkey.pem;
+
+        ssl_protocols       TLSv1.2 TLSv1.3;
+        ssl_ciphers         HIGH:!aNULL:!MD5;
+        ssl_session_cache   shared:SSL:10m;
+        ssl_session_timeout 10m;
+        ssl_stapling        on;
+        ssl_stapling_verify on;
+
+        client_max_body_size 10G;
+        proxy_buffering      off;
+
+        # Pass real client IP and proto to every backend
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # ── /metrics → detector dashboard (UI page) ───────────────────
+        location /metrics {
+            proxy_pass         http://detector_dashboard/;
+            proxy_read_timeout 30s;
+        }
+
+        location /metrics/ {
+            proxy_pass         http://detector_dashboard/;
+            proxy_read_timeout 30s;
+        }
+
+        # ── /api/stats → detector JSON endpoint ──────────────────────
+        # FIX: the dashboard JS fetches /api/stats.  Without this block,
+        # requests to https://domain.com/api/stats fall through to the
+        # Nextcloud location and return a 404.  This explicit location
+        # proxies the JSON API endpoint regardless of how the dashboard
+        # was reached (/metrics or direct :8080 access).
+        location /api/stats {
+            proxy_pass         http://detector_dashboard/api/stats;
+            proxy_read_timeout 10s;
+            add_header Access-Control-Allow-Origin "*";
+        }
+
+        # ── / → Nextcloud ─────────────────────────────────────────────
+        location / {
+            proxy_pass            http://nextcloud_backend;
+            proxy_read_timeout    300s;
+            proxy_connect_timeout 10s;
+
+            # Required for Nextcloud WebDAV
+            proxy_set_header  Authorization $http_authorization;
+            proxy_pass_header Authorization;
+        }
+    }
+}
