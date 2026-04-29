@@ -346,9 +346,7 @@ sudo iptables -L INPUT -n --line-numbers
 | `https://ddos-detector.duckdns.org/metrics/` | Live anomaly detection dashboard (HTTPS) |
 
 The dashboard is served over HTTPS via a Let's Encrypt certificate. Nextcloud is
-kept IP-only as required by the task specification.
-
-> **Server IP and dashboard URL will be updated here when the server is live for grading.**
+kept IP-only.
 
 ---
 
