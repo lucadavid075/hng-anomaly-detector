@@ -10,21 +10,6 @@ Spec requirements:
 Routes:
   GET /          → HTML dashboard page
   GET /api/stats → JSON stats (fetched by the page every 3 s)
-
-NGINX PROXY FIX
----------------
-The original JS used `window.location.origin` as the API base, which
-means a request to https://domain.com/metrics would fetch
-https://domain.com/api/stats — a path not proxied by nginx, so it hits
-Nextcloud and returns a 404.
-
-Fix: the JS now uses a relative path `./api/stats` when the page is
-served under a sub-path (detected via window.location.pathname), and
-falls back to the origin-relative path when accessed directly on :8080.
-
-Also: the /api/stats JSON now includes `baseline` per active ban so the
-dashboard table can show the correct "Effective mean at ban time" value
-instead of incorrectly re-displaying the rate column.
 """
 
 import json
@@ -84,7 +69,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "ip":         r.ip,
                 "condition":  r.condition,
                 "rate":       r.rate,
-                "baseline":   r.baseline,   # FIX: was missing — JS was showing rate in this column
+                "baseline":   r.baseline,  
                 "level":      r.level,
                 "banned_ago": int(time.time() - r.banned_at),
                 "remaining_s": remaining,
@@ -96,12 +81,11 @@ class _Handler(BaseHTTPRequestHandler):
         stats = {
             "uptime":           f"{h:02d}:{m:02d}:{s:02d}",
             "global_rps":       round(self.detector.global_rps, 2),
-            # effective_mean and stddev — computed from REAL traffic, never hardcoded
+            # effective_mean and stddev
             "mean":             round(self.baseline.mean, 4),
             "stddev":           round(self.baseline.stddev, 4),
             "baseline_source":  self.baseline.current_source,
             # hourly_slots enables the dashboard to show two slots with different means
-            # (satisfies Screenshot 7 — Baseline-graph.png)
             "hourly_slots":     self.baseline.hourly_summary,
             "baseline_samples": self.baseline.sample_count,
             "cpu_pct":          round(cpu, 1),
@@ -258,11 +242,6 @@ function fmt(s){
   return h>0?`${h}h ${m}m`:m>0?`${m}m ${ss}s`:`${ss}s`;
 }
 
-// FIX: compute the correct API base so the fetch works both when the
-// dashboard is accessed directly on :8080 AND through the nginx /metrics proxy.
-// When served at https://domain.com/metrics, window.location.origin alone
-// gives https://domain.com, so /api/stats would hit Nextcloud (404).
-// We detect the sub-path and prefix accordingly.
 function apiBase() {
   const p = window.location.pathname;
   // Strip trailing slash, then any trailing segment (index.html, etc.)
@@ -322,7 +301,6 @@ async function refresh(){
     }
 
     // Active bans table
-    // FIX: show b.baseline (effective mean at ban time) in the "Baseline at ban"
     // column — the original code showed b.rate in that column by mistake.
     const banBody = document.getElementById('banBody');
     if (d.banned_ips.length === 0) {
