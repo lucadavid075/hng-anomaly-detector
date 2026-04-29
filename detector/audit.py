@@ -5,17 +5,6 @@ Spec format (exact):
   [timestamp] ACTION ip | condition | rate | baseline | duration
 
 Written for: every BAN, every UNBAN, every BASELINE_RECALC.
-
-FIX (v4 → v5): Rate duplication in BAN entries.
-  The condition string from detector.py already contained "rate=X req/s".
-  write_audit() then appended "rate=X.XX" again as its own field.
-  A BAN line had "rate=" twice, making it harder to parse programmatically.
-
-  Fix: the condition string in detector.py now contains only the statistical
-  trigger (e.g. "zscore=5.2 > 3.0 | rate=X req/s | baseline=Y req/s").
-  write_audit() still writes the required "rate=..." and "baseline=..." fields
-  after the pipe, which means they appear exactly once in each line.
-
 This module has zero imports from other detector modules — safe to import anywhere.
 """
 
