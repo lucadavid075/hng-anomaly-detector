@@ -8,7 +8,7 @@ Two deque-based windows — NOT per-minute counters:
   _ip_windows[ip]  — deque of Unix float timestamps per IP
   _global_window   — deque of Unix float timestamps, all traffic
 
-Eviction (per spec):
+Eviction:
   On every new request, append the timestamp to the right, then popleft()
   all entries older than 60 seconds. O(1) per eviction.
   len(deque) after eviction = requests in the last 60 seconds.
@@ -28,13 +28,8 @@ Anomaly Detection (per spec — exact wording):
 
   No additional gates. The spec's two conditions are sufficient.
 
-  FIX (v4 → v5): The v4 code added three extra gates (min_ip_rate_per_s=5.0,
-  min_rate_ratio=3.0, min_ban_rate_per_s=5.0) that are NOT in the spec and
-  actively cause missed attacks. A simulation showed an IP at z-score=18.3
-  (8× normal rate) going undetected because it was under the 5 req/s floor.
-  These gates have been removed. Detection now matches the spec exactly.
-
-Error Surge (per spec):
+ 
+Error Surge:
   If an IP's 4xx/5xx rate >= 3× the global baseline error rate,
   halve both z_thresh and spike_mul for that IP only.
   This is a tightening (more sensitive), not an additional gate.
@@ -241,7 +236,7 @@ class AnomalyDetector:
         if stddev == 0.0 or mean == 0.0:
             return
 
-        # ── Error-surge tightening (per spec) ──────────────────────────────
+        # ── Error-surge tightening ──────────────────────────────
         # Compare this IP's error rate to the GLOBAL baseline error rate.
         # If IP error rate >= 3× global → IP is scanning/probing → halve thresholds.
         err_rate  = self._baseline.ip_error_rate(ip)
@@ -263,7 +258,7 @@ class AnomalyDetector:
                 ip, err_rate * 100, base_err * 100,
             )
 
-        # ── Spec detection: z-score OR spike, whichever fires first ────────
+        # ── z-score OR spike, whichever fires first ────────
         # Both rate_per_s and mean are in req/s — units are consistent.
         zscore = (rate_per_s - mean) / stddev
 
