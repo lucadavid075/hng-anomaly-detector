@@ -5,16 +5,6 @@ Per spec every alert must include:
   condition fired, current rate, baseline (effective_mean), timestamp,
   ban duration (where applicable).
 
-FIX (unban alert):
-  send_unban_alert() previously accepted only 3 positional args (ip, prev_level,
-  next_duration). blocker.unban() calls it with 3 extra keyword args
-  (condition, rate, baseline). This caused a TypeError that permanently killed
-  the unbanner thread the first time any ban expired — no IP was ever released
-  for the rest of the 12-hour window.
-
-  Fix: accept all 6 args. Display condition/rate/baseline in the Slack message
-  so ops knows why the IP was originally banned and at what rate.
-
 All rates are explicitly labelled req/s — no unit ambiguity.
 Uses Python's built-in urllib — no requests library dependency.
 """
@@ -63,7 +53,7 @@ class Notifier:
         ip:            str,
         prev_level:    int,
         next_duration: str,
-        # FIX: these three kwargs were passed by blocker.unban() but the old
+        # these three kwargs were passed by blocker.unban() but the old
         # signature didn't accept them → TypeError → unbanner thread died.
         condition:     str   = "",
         rate:          float = 0.0,
