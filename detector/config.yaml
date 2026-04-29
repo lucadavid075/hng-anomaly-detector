@@ -1,0 +1,66 @@
+# ─── HNG Anomaly Detection Engine — Configuration ────────────────────────────
+# ALL thresholds live here. Nothing is hardcoded in Python files.
+# effective_mean is NEVER hardcoded — always computed from real traffic data.
+#
+# SECURITY: webhook_url is intentionally blank.
+# Set SLACK_WEBHOOK_URL in your .env file instead.
+# The env-var is loaded by config.py and overrides this value at runtime.
+# Never commit a live Slack webhook URL to a public repository — Slack's
+# scanner will auto-revoke it within minutes of the push.
+
+slack:
+  webhook_url: ""
+
+log:
+  nginx_access_log: "/var/log/nginx/hng-access.log"
+  audit_log: "/var/log/detector/audit.log"
+
+dashboard:
+  host: "0.0.0.0"
+  port: 8080
+  refresh_interval_seconds: 3
+
+sliding_window:
+  # Pure timestamp deques — one Unix float per request.
+  # Eviction: popleft() while dq[0] < now - window_seconds  (O(1))
+  # Rate: len(deque_after_eviction) / window_seconds = req/s
+  # No counters, no per-minute resets, no rate-limiting libraries.
+  per_ip_window_seconds: 60
+  global_window_seconds: 60
+
+baseline:
+  rolling_window_minutes: 30             # 1800 per-second bucket slots max
+  recalculation_interval_seconds: 60     # recompute every 60 seconds
+  min_samples_for_hourly: 120            # prefer hourly slot when >= 120 points
+
+  # Cold-start guard: wait for this many per-second buckets before firing bans.
+  # 120 = ~2 minutes of at least 1 request per second.
+  # Prevents acting on an immature baseline WITHOUT hardcoding effective_mean.
+  min_baseline_samples: 120
+
+  # Proportional stddev floor:
+  # When traffic is perfectly uniform, stddev collapses to ~0.
+  # Any fluctuation then produces z-scores in the thousands.
+  # We enforce: stddev >= mean * min_stddev_ratio.
+  # This scales with traffic — NOT a hardcoded constant.
+  # Only stddev gets a floor; effective_mean is always the real computed value.
+  min_stddev_ratio: 0.3
+
+detection:
+  # ── Spec-mandated thresholds ───────────────────────────────────────────────
+  # Spec: "Flag as anomalous if z-score exceeds 3.0 OR rate > 5x mean"
+  zscore_threshold: 3.0
+  spike_multiplier: 5.0
+
+  # Spec: "If IP's 4xx/5xx rate is 3x the baseline error rate, tighten thresholds"
+  error_rate_multiplier: 3.0
+
+blocking:
+  ban_alert_timeout_seconds: 10
+  # Spec: "Release bans on a backoff schedule — 10 min, 30 min, 2 hours, then permanent"
+  unban_schedule_minutes: [10, 30, 120]
+  whitelist_ips:
+    - "127.0.0.1"
+    - "::1"
+    - "105.113.16.0/24"
+    - "16.59.170.236"
