@@ -4,16 +4,6 @@ blocker.py — iptables-based IP blocking with escalating ban schedule.
 Ban lifecycle (per spec): 10 min → 30 min → 2 hours → permanent
 Each expiry triggers an escalation to the next ban level.
 Slack alert is sent within 10 seconds of every ban.
-
-LOCK-CONTENTION FIX
---------------------
-The original code called iptables subprocesses (5-second timeout each)
-*inside* the RLock inside unban().  This blocked all threads that need
-the lock (including the monitor thread) for up to 10 seconds per unban.
-
-Fix: collect the iptables commands to run inside the lock, then execute
-them *after* releasing the lock.  The in-memory state update (dict
-mutation) is still atomic under the lock; iptables just runs free.
 """
 
 import logging
@@ -121,7 +111,7 @@ class Blocker:
             duration  = duration_str,
         )
 
-        # Slack alert — spec requires within 10 seconds of ban
+        # Slack alert within 10 seconds of ban
         self._notifier.send_ban_alert(ip, condition, rate, baseline, duration_str)
 
     def unban(self, ip: str) -> BanRecord | None:
@@ -156,7 +146,7 @@ class Blocker:
 
             self._bans[ip] = new_record
 
-        # ── iptables and notifications OUTSIDE the lock ───────────────────
+        # iptables and notifications OUTSIDE the lock
         # Remove old rule, immediately add new one — brief gap is unavoidable
         # but keeping it outside the lock means we don't stall other threads.
         _iptables("-D", "INPUT", "-s", ip, "-j", "DROP")
