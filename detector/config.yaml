@@ -1,13 +1,6 @@
 # ─── HNG Anomaly Detection Engine — Configuration ────────────────────────────
 # ALL thresholds live here. Nothing is hardcoded in Python files.
-# effective_mean is NEVER hardcoded — always computed from real traffic data.
-#
-# SECURITY: webhook_url is intentionally blank.
-# Set SLACK_WEBHOOK_URL in your .env file instead.
-# The env-var is loaded by config.py and overrides this value at runtime.
-# Never commit a live Slack webhook URL to a public repository — Slack's
-# scanner will auto-revoke it within minutes of the push.
-
+# effective_mean — always computed from real traffic data.
 slack:
   webhook_url: ""
 
@@ -41,26 +34,18 @@ baseline:
   # Proportional stddev floor:
   # When traffic is perfectly uniform, stddev collapses to ~0.
   # Any fluctuation then produces z-scores in the thousands.
-  # We enforce: stddev >= mean * min_stddev_ratio.
-  # This scales with traffic — NOT a hardcoded constant.
-  # Only stddev gets a floor; effective_mean is always the real computed value.
   min_stddev_ratio: 0.3
 
 detection:
-  # ── Spec-mandated thresholds ───────────────────────────────────────────────
-  # Spec: "Flag as anomalous if z-score exceeds 3.0 OR rate > 5x mean"
+  # threshold
+  # Flag as anomalous if z-score exceeds 3.0 OR rate > 5x mean
   zscore_threshold: 3.0
   spike_multiplier: 5.0
-
-  # Spec: "If IP's 4xx/5xx rate is 3x the baseline error rate, tighten thresholds"
   error_rate_multiplier: 3.0
 
 blocking:
   ban_alert_timeout_seconds: 10
-  # Spec: "Release bans on a backoff schedule — 10 min, 30 min, 2 hours, then permanent"
   unban_schedule_minutes: [10, 30, 120]
   whitelist_ips:
     - "127.0.0.1"
     - "::1"
-    - "105.113.16.0/24"
-    - "16.59.170.236"
